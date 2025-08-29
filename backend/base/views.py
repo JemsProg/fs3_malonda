@@ -118,72 +118,94 @@ def remove_cart_item(request, cart_id):
 
 
 # payment ======================================================================
-
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def create_gcash_payment(request):
     serializer = CheckoutSerializer(data=request.data)
-    if serializer.is_valid():
-        data = serializer.validated_data
-        user = request.user
-        
-        secret_key = "sk_test_6Wu2UUWNZkq1KqyjxjFNEzvZ"
-        encoded_key = base64.b64encode(f"{secret_key}:".encode()).decode()
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+    user = request.user
 
-        headers = {
-            "Authorization": f"Basic {encoded_key}",
-            "Content-Type": "application/json"
-        }
+    try:
+        secret_key = settings.PAYMONGO_SECRET_KEY  # don't hardcode
+    except Exception:
+        return Response({"error": "Missing PayMongo key"}, status=500)
+
+    try:
+        encoded_key = base64.b64encode(f"{secret_key}:".encode()).decode()
+        headers = {"Authorization": f"Basic {encoded_key}",
+                   "Content-Type": "application/json"}
+
+        # Ensure Decimal math, then int centavos
+        amount_centavos = int((data["total_price"] * Decimal("100")).to_integral_value())
 
         payload = {
-                "data": {
-                    "attributes": {
-                        "amount": int(data["total_price"] * 100),  # centavos
-                        "description": "Order Payment",
-                        "remarks": "GCash only",
-                        "redirect": {
-                            "success": "http://localhost:3000/payment-success",
-                            "failed": "http://localhost:3000/payment-failed"
-                        },
-                        "billing": {
-                            "name": data["full_name"],
-                            "email": data["email"],
-                            "phone": data.get("mobile")
-                        },
-                        "payment_method_types": ["gcash"]
-                    }
+            "data": {
+                "attributes": {
+                    "amount": amount_centavos,
+                    "description": "Order Payment",
+                    "remarks": "GCash only",
+                    "redirect": {
+                        "success": "http://localhost:3000/payment-success",
+                        "failed": "http://localhost:3000/payment-failed"
+                    },
+                    "billing": {
+                        "name": data["full_name"],
+                        "email": data["email"],
+                        "phone": data.get("mobile") or None
+                    },
+                    "payment_method_types": ["gcash"]
                 }
             }
-        response = requests.post("https://api.paymongo.com/v1/links", headers=headers, json=payload)
-        result = response.json()
-        
-        if "data" in result:
-            checkout_url = result["data"]["attributes"]["checkout_url"]
-            paymongo_id = result["data"]["id"]
-            status_str = result["data"]["attributes"]["status"]
+        }
 
-            payment = PaymentMethod.objects.create(
-                user=user,
-                total_price=data["total_price"],
-                is_paid = False,
-                paymongo_payment_id =paymongo_id,
-                paymongo_status=status_str
-            )
+        resp = requests.post("https://api.paymongo.com/v1/links",
+                             headers=headers, json=payload, timeout=20)
+        # If PayMongo returns a non-2xx or non-JSON, handle it
+        try:
+            result = resp.json()
+        except ValueError:
+            return Response({"error": "PayMongo returned non-JSON"}, status=502)
 
-            ShippingAddress.objects.create(
-                payment=payment,
-                full_name=data["full_name"],
-                address=data["address"],
-                city=data["city"],
-                postal_code=data["postal_code"],
-                country=data["country"]
-            )
-            
-            return Response({"checkout_url": checkout_url}, status=200)
+        if resp.status_code >= 400:
+            return Response({"error": result}, status=502)
 
-        return Response({"error": result}, status=400)
+        # Defensive checks
+        data_obj = result.get("data", {})
+        attrs = data_obj.get("attributes", {})
+        checkout_url = attrs.get("checkout_url")
+        paymongo_id = data_obj.get("id")
+        status_str = attrs.get("status")
 
-    return Response(serializer.errors, status=400)
+        if not (checkout_url and paymongo_id):
+            return Response({"error": "Unexpected PayMongo response", "raw": result}, status=502)
+
+        # DB writes can also error → wrap
+        payment = PaymentMethod.objects.create(
+            user=user,
+            total_price=data["total_price"],
+            is_paid=False,
+            paymongo_payment_id=paymongo_id,
+            paymongo_status=status_str or "pending"
+        )
+
+        ShippingAddress.objects.create(
+            payment=payment,
+            full_name=data["full_name"],
+            address=data["address"],
+            city=data["city"],
+            postal_code=data["postal_code"],
+            country=data["country"],
+        )
+
+        return Response({"checkout_url": checkout_url}, status=200)
+
+    except requests.Timeout:
+        return Response({"error": "PayMongo timeout"}, status=504)
+    except requests.RequestException as e:
+        return Response({"error": f"PayMongo error: {str(e)}"}, status=502)
+    except Exception as e:
+        return Response({"error": str(e)}, status=500)
 
 @csrf_exempt
 @api_view(['POST'])
