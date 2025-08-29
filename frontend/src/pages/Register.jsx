@@ -1,91 +1,138 @@
-// Register.jsx
-import React from "react";
+import React, { useState } from "react";
+import { Link } from "react-router-dom";
 
-export default function Register() {
-  // Static UI (no logic) — prevent page refresh on submit
-  const onSubmit = (e) => e.preventDefault();
+const Register = () => {
+  const [formData, setFormData] = useState({
+    username: "",
+    email: "",
+    password: "",
+    confirmPassword: "",
+  });
+
+  const [errors, setErrors] = useState({});
+
+  const handleChange = (e) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  const validate = () => {
+    const newErrors = {};
+
+    if (!formData.username.trim()) newErrors.username = "Username is required.";
+    if (!formData.email.trim()) {
+      newErrors.email = "Email is required.";
+    } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
+      newErrors.email = "Invalid email format.";
+    }
+
+    if (!formData.password) newErrors.password = "Password is required.";
+    if (!formData.confirmPassword) {
+      newErrors.confirmPassword = "Please confirm your password.";
+    } else if (formData.password !== formData.confirmPassword) {
+      newErrors.confirmPassword = "Passwords do not match.";
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!validate()) return;
+
+    // ✅ Add your API logic here
+    console.log("Form is valid. Ready to submit:", formData);
+  };
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <div className="mx-auto w-full max-w-md rounded-lg bg-white p-8 shadow-md">
-        <h1 className="mb-6 text-3xl font-semibold text-[#0e1f4a]">Sign Up</h1>
+    <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4">
+      <form
+        onSubmit={handleSubmit}
+        className="bg-white shadow-md rounded-md p-6 w-full max-w-sm"
+      >
+        <h2 className="text-2xl font-bold text-primary mb-4">Sign Up</h2>
 
-        <form onSubmit={onSubmit} className="space-y-4">
-          {/* Username */}
-          <div>
-            <label
-              htmlFor="username"
-              className="mb-1 block text-xs font-medium text-gray-700"
-            >
-              Username
-            </label>
-            <input
-              id="username"
-              type="text"
-              autoComplete="username"
-              className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-transparent focus:ring-2 focus:ring-[#0e1f4a]"
-            />
-          </div>
+        {/* Username */}
+        <div className="mb-4">
+          <label className="block text-sm mb-1">Username</label>
+          <input
+            type="text"
+            name="username"
+            value={formData.username}
+            onChange={handleChange}
+            className="w-full border border-gray-300 p-2 rounded"
+            placeholder="Enter your username"
+          />
+          {errors.username && (
+            <p className="text-red-600 text-sm">{errors.username}</p>
+          )}
+        </div>
 
-          {/* Email */}
-          <div>
-            <label
-              htmlFor="email"
-              className="mb-1 block text-xs font-medium text-gray-700"
-            >
-              Email
-            </label>
-            <input
-              id="email"
-              type="email"
-              autoComplete="email"
-              className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-transparent focus:ring-2 focus:ring-[#0e1f4a]"
-            />
-          </div>
+        {/* Email */}
+        <div className="mb-4">
+          <label className="block text-sm mb-1">Email</label>
+          <input
+            type="email"
+            name="email"
+            value={formData.email}
+            onChange={handleChange}
+            className="w-full border border-gray-300 p-2 rounded"
+            placeholder="Enter your email"
+          />
+          {errors.email && (
+            <p className="text-red-600 text-sm">{errors.email}</p>
+          )}
+        </div>
 
-          {/* Password */}
-          <div>
-            <label
-              htmlFor="password"
-              className="mb-1 block text-xs font-medium text-gray-700"
-            >
-              Password
-            </label>
-            <input
-              id="password"
-              type="password"
-              autoComplete="new-password"
-              className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-transparent focus:ring-2 focus:ring-[#0e1f4a]"
-            />
-          </div>
+        {/* Password */}
+        <div className="mb-4">
+          <label className="block text-sm mb-1">Password</label>
+          <input
+            type="password"
+            name="password"
+            value={formData.password}
+            onChange={handleChange}
+            className="w-full border border-gray-300 p-2 rounded"
+            placeholder="Enter your password"
+          />
+          {errors.password && (
+            <p className="text-red-600 text-sm">{errors.password}</p>
+          )}
+        </div>
 
-          {/* Confirm Password */}
-          <div>
-            <label
-              htmlFor="confirmPassword"
-              className="mb-1 block text-xs font-medium text-gray-700"
-            >
-              Confirm Password
-            </label>
-            <input
-              id="confirmPassword"
-              type="password"
-              autoComplete="new-password"
-              className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-transparent focus:ring-2 focus:ring-[#0e1f4a]"
-            />
-          </div>
+        {/* Confirm Password */}
+        <div className="mb-4">
+          <label className="block text-sm mb-1">Confirm Password</label>
+          <input
+            type="password"
+            name="confirmPassword"
+            value={formData.confirmPassword}
+            onChange={handleChange}
+            className="w-full border border-gray-300 p-2 rounded"
+            placeholder="Re-enter your password"
+          />
+          {errors.confirmPassword && (
+            <p className="text-red-600 text-sm">{errors.confirmPassword}</p>
+          )}
+        </div>
 
-          {/* Button */}
-          <button
-            type="submit"
-            className="w-full rounded-md bg-[#0e1f4a] py-2 text-sm font-medium text-white hover:opacity-95 active:opacity-90"
-          >
-            Register
-          </button>
-        </form>
+        {/* Register Button */}
+        <button
+          type="submit"
+          className="w-full bg-primary text-white py-2 rounded hover:bg-primary-hover transition"
+        >
+          Register
+        </button>
 
-        <p className="mt-4 text-xs text-gray-700">I already had an account.</p>
-      </div>
+        {/* Bottom Text */}
+        <div className="mt-4 text-center">
+          <Link to="/login" className="text-sm text-gray-600 hover:underline">
+            I already had an account.
+          </Link>
+        </div>
+      </form>
     </div>
   );
-}
+};
+
+export default Register;

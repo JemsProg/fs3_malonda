@@ -45,7 +45,7 @@ axiosInstance.interceptors.response.use(
 
         // OPTIONAL: Hit backend logout endpoint (if session tracking)
         try {
-          await axios.post(`${BASE_URL}api/logout/`, null, {
+          await axios.post(`${BASE_URL}logout/`, null, {
             headers: {
               Authorization: `Bearer ${localStorage.getItem("access_token")}`,
             },

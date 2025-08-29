@@ -1,204 +1,468 @@
-// src/components/Cart.jsx
 import React, { useEffect, useMemo, useState } from "react";
-import { FiMinus, FiPlus, FiX } from "react-icons/fi";
+import { useNavigate } from "react-router-dom";
 import axiosInstance from "../api/axiosInstance";
 import { BASE_URL } from "../api/api";
 
-const API_PREFIX = "api/";
+/* ------- Reusable Modals ------- */
+const ModalShell = ({ open, onClose, title, children, actions }) => {
+  if (!open) return null;
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+    >
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-[1px]" />
+      <div
+        className="relative w-full sm:max-w-md bg-white rounded-2xl shadow-2xl mx-3 p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {title && <h3 className="text-lg font-semibold">{title}</h3>}
+        <div className="mt-3 text-sm text-gray-700">{children}</div>
+        <div className="mt-5 flex items-center justify-end gap-2">
+          {actions}
+          <button
+            onClick={onClose}
+            className="px-4 py-2 rounded-lg border hover:bg-gray-50"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
-const fmt = (n) =>
-  (Number(n) || 0).toLocaleString(undefined, {
+const ErrorModal = ({ open, onClose, message, kind = "other", onLogin }) => (
+  <ModalShell
+    open={open}
+    onClose={onClose}
+    title="Something went wrong"
+    actions={
+      kind === "auth" ? (
+        <button
+          onClick={onLogin}
+          className="px-4 py-2 rounded-lg bg-blue-900 text-white hover:bg-blue-800"
+        >
+          Log in
+        </button>
+      ) : null
+    }
+  >
+    <p>{message}</p>
+  </ModalShell>
+);
+
+const ConfirmModal = ({
+  open,
+  onClose,
+  title = "Are you sure?",
+  message,
+  confirmText = "Confirm",
+  onConfirm,
+}) => (
+  <ModalShell
+    open={open}
+    onClose={onClose}
+    title={title}
+    actions={
+      <button
+        onClick={onConfirm}
+        className="px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700"
+      >
+        {confirmText}
+      </button>
+    }
+  >
+    <p>{message}</p>
+  </ModalShell>
+);
+/* -------------------------------- */
+
+const currency = (n) =>
+  Number(n || 0).toLocaleString(undefined, {
     style: "currency",
-    currency: "USD",
+    currency: "PHP",
   });
 
-export default function Cart() {
-  const [items, setItems] = useState([]);
+const Cart = () => {
+  const [cartItems, setCartItems] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState("");
+  const [checkingOut, setCheckingOut] = useState(false);
 
-  const fetchCart = async () => {
-    setLoading(true);
-    setErr("");
-    try {
-      const { data } = await axiosInstance.get(`${API_PREFIX}cart/`);
-      setItems(data);
-    } catch (e) {
-      console.error(e);
-      setErr(
-        e?.response?.status === 401
-          ? "Your session expired. Please sign in again."
-          : "Failed to load cart."
-      );
-    } finally {
-      setLoading(false);
-    }
+  // Error modal state
+  const [errorOpen, setErrorOpen] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
+  const [errorKind, setErrorKind] = useState("other"); // 'auth' | 'other'
+
+  // Confirm remove modal state
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [toRemove, setToRemove] = useState({ id: null, name: "", subtotal: 0 });
+
+  const [checkout, setCheckout] = useState({
+    full_name: "",
+    address: "",
+    city: "",
+    postal_code: "",
+    country: "Philippines",
+    email: "",
+    mobile: "",
+  });
+
+  const navigate = useNavigate();
+
+  const openError = (msg, kind = "other") => {
+    setErrorMsg(msg);
+    setErrorKind(kind);
+    setErrorOpen(true);
   };
 
+  // Load cart
   useEffect(() => {
-    fetchCart();
+    const load = async () => {
+      setLoading(true);
+      try {
+        const { data } = await axiosInstance.get("cart/");
+        setCartItems(data);
+      } catch (e) {
+        console.error(e);
+        if (e?.response?.status === 401) {
+          openError("Please log in to view your cart.", "auth");
+        } else {
+          openError("Failed to load cart. Please try again.");
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
   }, []);
 
-  const subtotal = useMemo(
+  // Presentational mapping
+  const viewItems = useMemo(
     () =>
-      items.reduce(
-        (s, i) => s + (i.product?.product_price || 0) * (i.qty || 1),
-        0
-      ),
-    [items]
+      cartItems.map((it) => ({
+        id: it.cart_id,
+        name: it.product?.product_name,
+        price: Number(it.product?.product_price || 0),
+        quantity: Number(it.qty || 0),
+        image: it.product?.image ? `${BASE_URL}${it.product.image}` : "",
+        countInStock: Number(it.product?.countInStock || 0),
+      })),
+    [cartItems]
   );
 
-  const updateQty = async (cartId, delta) => {
-    const current = items.find((i) => i.cart_id === cartId);
-    if (!current) return;
-    const newQty = Math.max(1, (current.qty || 1) + delta);
+  const total = useMemo(
+    () => viewItems.reduce((sum, it) => sum + it.price * it.quantity, 0),
+    [viewItems]
+  );
 
-    // Optimistic UI
-    setItems((prev) =>
-      prev.map((i) => (i.cart_id === cartId ? { ...i, qty: newQty } : i))
-    );
-
+  const syncQty = async (cartId, newQty) => {
     try {
-      const { data } = await axiosInstance.put(
-        `${API_PREFIX}cart/update/${cartId}/`,
-        { qty: newQty }
+      await axiosInstance.put(`cart/${cartId}/`, { qty: newQty });
+      setCartItems((items) =>
+        items.map((it) => (it.cart_id === cartId ? { ...it, qty: newQty } : it))
       );
-      // sync with server (qty, price, etc.)
-      setItems((prev) => prev.map((i) => (i.cart_id === cartId ? data : i)));
     } catch (e) {
       console.error(e);
-      // rollback on failure
-      setItems((prev) => prev.map((i) => (i.cart_id === cartId ? current : i)));
-      alert("Unable to update quantity.");
+      openError("Could not update quantity. Please try again.");
     }
   };
 
-  const removeItem = async (cartId) => {
-    const snapshot = items;
-    // Optimistic remove
-    setItems((prev) => prev.filter((i) => i.cart_id !== cartId));
+  const increment = (cartId) => {
+    const item = viewItems.find((i) => i.id === cartId);
+    if (!item) return;
+    const capped = Math.min(item.quantity + 1, item.countInStock || 0);
+    if (capped !== item.quantity) syncQty(cartId, capped);
+  };
+
+  const decrement = (cartId) => {
+    const item = viewItems.find((i) => i.id === cartId);
+    if (!item) return;
+    const next = Math.max(1, item.quantity - 1);
+    if (next !== item.quantity) syncQty(cartId, next);
+  };
+
+  // Prompt remove
+  const promptRemove = (item) => {
+    setToRemove({
+      id: item.id,
+      name: item.name,
+      subtotal: item.price * item.quantity,
+    });
+    setConfirmOpen(true);
+  };
+
+  // Confirm removal
+  const confirmRemove = async () => {
+    const id = toRemove.id;
+    setConfirmOpen(false);
     try {
-      await axiosInstance.delete(`${API_PREFIX}cart/remove/${cartId}/`);
+      await axiosInstance.delete(`cart/${id}/delete/`);
+      setCartItems((items) => items.filter((it) => it.cart_id !== id));
     } catch (e) {
       console.error(e);
-      setItems(snapshot); // rollback
-      alert("Unable to remove item.");
+      openError("Could not remove item. Please try again.");
+    } finally {
+      setToRemove({ id: null, name: "", subtotal: 0 });
+    }
+  };
+
+  const onCheckoutChange = (e) => {
+    const { name, value } = e.target;
+    setCheckout((c) => ({ ...c, [name]: value }));
+  };
+
+  const proceedToCheckout = async () => {
+    if (viewItems.length === 0) {
+      openError("Your cart is empty.");
+      return;
+    }
+
+    const required = [
+      "full_name",
+      "address",
+      "city",
+      "postal_code",
+      "country",
+      "email",
+    ];
+    const missing = required.filter((k) => !checkout[k]?.trim());
+    if (missing.length) {
+      openError(`Please complete: ${missing.join(", ")}.`);
+      return;
+    }
+
+    setCheckingOut(true);
+    try {
+      const payload = { total_price: total, ...checkout };
+      const { data } = await axiosInstance.post(
+        "api/payments/create/",
+        payload
+      );
+      if (data?.checkout_url) {
+        window.location.href = data.checkout_url; // PayMongo hosted checkout
+      } else {
+        openError("Payment link not returned. Please try again.");
+      }
+    } catch (e) {
+      console.error(e);
+      if (e?.response?.status === 401) {
+        openError("Your session has expired. Please log in again.", "auth");
+      } else {
+        const errMsg = e?.response?.data?.error
+          ? typeof e.response.data.error === "string"
+            ? e.response.data.error
+            : JSON.stringify(e.response.data.error)
+          : "Failed to create payment. Please try again.";
+        openError(errMsg);
+      }
+    } finally {
+      setCheckingOut(false);
     }
   };
 
   return (
-    <div className="bg-[#F5F6FA] min-h-[60vh] py-8 md:py-10">
-      <div className="mx-auto w-full max-w-6xl px-4 md:px-6 grid gap-8 md:grid-cols-[2fr_1fr]">
-        {/* Cart Panel */}
-        <section className="bg-white rounded-lg shadow-md">
-          <div className="px-6 py-5">
-            <h1 className="text-2xl font-semibold">Shopping Cart</h1>
-          </div>
+    <>
+      <div className="max-w-6xl h-screen mx-auto p-6 grid md:grid-cols-[1fr_360px] gap-6">
+        <div>
+          <h1 className="text-2xl font-bold mb-4">Shopping Cart</h1>
 
           {loading ? (
-            <div className="px-6 py-10 text-center text-sm text-gray-500">
-              Loading your cart…
+            <div className="rounded-2xl bg-white shadow-md p-10 text-center text-gray-500">
+              Loading cart…
             </div>
-          ) : err ? (
-            <div className="px-6 py-10 text-center text-sm text-red-600">
-              {err}
+          ) : viewItems.length === 0 ? (
+            <div className="rounded-2xl bg-white shadow-md p-10 text-center text-gray-500">
+              Your cart is empty.
             </div>
           ) : (
-            <div className="divide-y">
-              {items.length === 0 ? (
-                <div className="px-6 py-10 text-center text-sm text-gray-500">
-                  Your cart is empty.
+            <div className="rounded-2xl bg-white shadow-lg overflow-hidden divide-y divide-gray-100">
+              {viewItems.map((item) => (
+                <div
+                  key={item.id}
+                  className="grid items-center gap-4 p-4 sm:px-6 grid-cols-[96px_1fr_auto_auto]"
+                >
+                  {/* Image */}
+                  <img
+                    src={item.image}
+                    alt={item.name}
+                    className="w-24 h-24 object-cover rounded shrink-0 shadow-sm"
+                    loading="lazy"
+                  />
+
+                  {/* Title / price */}
+                  <div className="min-w-0">
+                    <h2 className="font-semibold truncate">{item.name}</h2>
+                    <p className="text-sm text-gray-500">
+                      {currency(item.price)}
+                    </p>
+                    {item.countInStock <= 5 && (
+                      <p className="text-xs text-amber-600 mt-1">
+                        {item.countInStock > 0
+                          ? `Only ${item.countInStock} left`
+                          : "Out of stock"}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Quantity */}
+                  <div className="flex items-center justify-end gap-2">
+                    <button
+                      onClick={() => decrement(item.id)}
+                      className="h-8 w-8 grid place-items-center rounded hover:bg-gray-100 shadow-sm focus:outline-none disabled:opacity-50"
+                      aria-label="Decrease quantity"
+                      disabled={item.quantity <= 1}
+                    >
+                      −
+                    </button>
+                    <span className="w-8 text-center">{item.quantity}</span>
+                    <button
+                      onClick={() => increment(item.id)}
+                      className="h-8 w-8 grid place-items-center rounded hover:bg-gray-100 shadow-sm focus:outline-none disabled:opacity-50"
+                      aria-label="Increase quantity"
+                      disabled={item.quantity >= item.countInStock}
+                    >
+                      +
+                    </button>
+                  </div>
+
+                  {/* Subtotal + remove */}
+                  <div className="flex flex-col items-end gap-1">
+                    <button
+                      onClick={() => promptRemove(item)}
+                      className="text-sm text-red-500 hover:underline"
+                    >
+                      Remove
+                    </button>
+                    <span className="font-semibold">
+                      {currency(item.price * item.quantity)}
+                    </span>
+                  </div>
                 </div>
-              ) : (
-                items.map((item) => (
-                  <article key={item.cart_id} className="px-6 py-5">
-                    <div className="flex items-center gap-4">
-                      <img
-                        src={`${BASE_URL}${item.product.image}`}
-                        alt={item.product.product_name}
-                        className="h-14 w-24 rounded object-cover ring-1 ring-gray-200"
-                      />
+              ))}
 
-                      <div className="min-w-0 flex-1">
-                        <p className="font-medium">
-                          {item.product.product_name}
-                        </p>
-
-                        <div className="mt-2 flex items-center gap-6 text-sm text-gray-600">
-                          <div className="flex items-center gap-2">
-                            <span className="mr-1">Qty:</span>
-                            <button
-                              type="button"
-                              aria-label="Decrease quantity"
-                              onClick={() => updateQty(item.cart_id, -1)}
-                              className="grid h-7 w-7 place-items-center rounded-full border border-gray-300 hover:bg-gray-50"
-                            >
-                              <FiMinus />
-                            </button>
-                            <span className="inline-block w-6 text-center font-medium text-gray-900">
-                              {item.qty}
-                            </span>
-                            <button
-                              type="button"
-                              aria-label="Increase quantity"
-                              onClick={() => updateQty(item.cart_id, 1)}
-                              className="grid h-7 w-7 place-items-center rounded-full border border-gray-300 hover:bg-gray-50"
-                            >
-                              <FiPlus />
-                            </button>
-                          </div>
-
-                          <span className="text-xs text-gray-500">
-                            Price: {fmt(item.product.product_price)}
-                          </span>
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        aria-label="Remove item"
-                        onClick={() => removeItem(item.cart_id)}
-                        className="ml-2 rounded-full p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-800"
-                      >
-                        <FiX size={18} />
-                      </button>
-                    </div>
-                  </article>
-                ))
-              )}
+              {/* Total */}
+              <div className="flex items-center justify-between p-4 sm:px-6">
+                <span className="font-semibold">Total:</span>
+                <span className="text-lg font-bold">{currency(total)}</span>
+              </div>
             </div>
           )}
-        </section>
+        </div>
 
-        {/* Summary Panel */}
-        <aside className="bg-white rounded-lg shadow-md h-max">
-          <div className="px-6 py-5">
-            <h2 className="text-xl font-semibold text-center">Order Summary</h2>
-
-            <div className="mt-6 space-y-4">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-gray-600">Sub Total</span>
-                <span className="font-medium">{fmt(subtotal)}</span>
+        {/* Checkout */}
+        <aside className="md:sticky md:top-6 h-fit">
+          <div className="rounded-2xl bg-white shadow-lg p-4 sm:p-6">
+            <h2 className="text-lg font-semibold mb-3">Checkout</h2>
+            <div className="space-y-3">
+              <input
+                name="full_name"
+                value={checkout.full_name}
+                onChange={onCheckoutChange}
+                placeholder="Full name"
+                className="w-full rounded px-3 py-2 shadow-sm focus:outline-none"
+              />
+              <input
+                name="email"
+                value={checkout.email}
+                onChange={onCheckoutChange}
+                placeholder="Email"
+                type="email"
+                className="w-full rounded px-3 py-2 shadow-sm focus:outline-none"
+              />
+              <input
+                name="mobile"
+                value={checkout.mobile}
+                onChange={onCheckoutChange}
+                placeholder="Mobile (optional)"
+                className="w-full rounded px-3 py-2 shadow-sm focus:outline-none"
+              />
+              <input
+                name="address"
+                value={checkout.address}
+                onChange={onCheckoutChange}
+                placeholder="Address"
+                className="w-full rounded px-3 py-2 shadow-sm focus:outline-none"
+              />
+              <div className="grid grid-cols-2 gap-3">
+                <input
+                  name="city"
+                  value={checkout.city}
+                  onChange={onCheckoutChange}
+                  placeholder="City"
+                  className="w-full rounded px-3 py-2 shadow-sm focus:outline-none"
+                />
+                <input
+                  name="postal_code"
+                  value={checkout.postal_code}
+                  onChange={onCheckoutChange}
+                  placeholder="Postal Code"
+                  className="w-full rounded px-3 py-2 shadow-sm focus:outline-none"
+                />
               </div>
-
-              <hr className="border-gray-200" />
-
-              <div className="flex items-center justify-between text-base">
-                <span className="font-medium">Total</span>
-                <span className="font-semibold">{fmt(subtotal)}</span>
-              </div>
-
-              <button
-                type="button"
-                className="mt-4 w-full rounded-md bg-[#142A59] py-2.5 text-white font-medium hover:opacity-95 active:opacity-90"
-                onClick={() => alert("Proceeding to checkout…")}
-              >
-                Checkout
-              </button>
+              <input
+                name="country"
+                value={checkout.country}
+                onChange={onCheckoutChange}
+                placeholder="Country"
+                className="w-full rounded px-3 py-2 shadow-sm focus:outline-none"
+              />
             </div>
+
+            <div className="mt-4 flex items-center justify-between">
+              <span className="font-medium">Total</span>
+              <span className="font-bold">{currency(total)}</span>
+            </div>
+
+            <button
+              onClick={proceedToCheckout}
+              disabled={checkingOut || loading || viewItems.length === 0}
+              className="mt-4 w-full bg-primary hover:bg-primary-hover text-white py-3 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed shadow"
+            >
+              {checkingOut ? "Creating Payment Link..." : "Proceed to Checkout"}
+            </button>
+
+            <p className="text-xs text-gray-500 mt-2">
+              You’ll be redirected to PayMongo (GCash) to complete payment.
+            </p>
           </div>
         </aside>
       </div>
-    </div>
+
+      {/* Error Modal (all errors funnel here) */}
+      <ErrorModal
+        open={errorOpen}
+        onClose={() => setErrorOpen(false)}
+        message={errorMsg}
+        kind={errorKind}
+        onLogin={() => navigate("/login")}
+      />
+
+      {/* Confirm Remove Modal */}
+      <ConfirmModal
+        open={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        title="Remove item?"
+        message={
+          <>
+            <div className="font-medium">{toRemove.name}</div>
+            <div className="text-gray-600">
+              This will remove the item from your cart.
+            </div>
+            {toRemove.subtotal > 0 && (
+              <div className="mt-2 text-sm">
+                Subtotal: {currency(toRemove.subtotal)}
+              </div>
+            )}
+          </>
+        }
+        confirmText="Remove"
+        onConfirm={confirmRemove}
+      />
+    </>
   );
-}
+};
+
+export default Cart;
