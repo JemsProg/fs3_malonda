@@ -14,7 +14,7 @@ import json
 from rest_framework.permissions import IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import Product, CartUser, PaymenMethod, ShippingAddress, OrderItem
+from .models import Product, CartUser, PaymentMethod, ShippingAddress, OrderItem
 from .serializer import (
     ProductSerializer,
     RegisterSerializer,
@@ -249,7 +249,7 @@ def get_order_detail(request, pk):
     Returns a single order (payment) with items + shipping.
     """
     payment = get_object_or_404(
-        PaymenMethod.objects
+        PaymentMethod.objects
         .filter(user=request.user)
         .prefetch_related('orderitem_set__product', 'shippingaddress_set'),
         pk=pk

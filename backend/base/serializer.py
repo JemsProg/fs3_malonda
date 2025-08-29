@@ -2,7 +2,7 @@ from django.contrib.auth.models import User
 from rest_framework import serializers
 from rest_framework.validators import UniqueValidator
 
-from .models import Product, CartUser, ShippingAddress, OrderItem, PaymenMethod
+from .models import Product, CartUser, ShippingAddress, OrderItem, PaymentMethod
 
 class RegisterSerializer(serializers.ModelSerializer):
     email = serializers.EmailField(
@@ -78,7 +78,7 @@ class OrderSerializer(serializers.ModelSerializer):
     shipping = serializers.SerializerMethodField()
 
     class Meta:
-        model = PaymenMethod
+        model = PaymentMethod
         fields = [
             'payment_id',
             'total_price',
