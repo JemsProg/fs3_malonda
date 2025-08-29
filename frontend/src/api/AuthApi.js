@@ -4,7 +4,7 @@ import { BASE_URL } from "./api";
 
 export async function handleLogin(username, password, setIsAuthenticated) {
   try {
-    const { data } = await axios.post(`${BASE_URL}token/`, {
+    const { data } = await axios.post(`${BASE_URL}api/token/`, {
       username,
       password,
     });
